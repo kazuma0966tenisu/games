@@ -17,11 +17,11 @@
         canvas {
             display: block;
         }
-        /* 縦画面のときに表示する警告オーバーレイ */
+        /* 縦画面のときに被せる警告オーバーレイ（Canvasは消さずに上に被せる） */
         #portrait-warning {
             display: none;
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
             background-color: #333;
             color: white;
             z-index: 9999;
@@ -30,10 +30,11 @@
             align-items: center;
             font-family: sans-serif;
             text-align: center;
+            touch-action: none;
         }
         @media screen and (orientation: portrait) {
             #portrait-warning { display: flex; }
-            #gameCanvas { display: none; }
+            /* ここにあった #gameCanvas { display: none; } を削除して描画バグを回避 */
         }
     </style>
 </head>
@@ -58,31 +59,39 @@
     };
 
     // 画面サイズ調整とボタンの画面外はみ出し防止
-    function resize() {
+    function applyResize() {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
 
-        // 初期配置、または画面回転時にボタンが画面外にあったら画面内に戻す
-        const margin = 20;
-        if (controls.move.y === 0 || controls.move.y > canvas.height - margin) controls.move.y = canvas.height - 100;
-        if (controls.move.x > canvas.width - margin) controls.move.x = 100;
+        const margin = 30;
         
-        if (controls.aim.y === 0 || controls.aim.y > canvas.height - margin) controls.aim.y = canvas.height - 100;
-        if (controls.aim.x === 0 || controls.aim.x > canvas.width - margin) controls.aim.x = canvas.width - 100;
-        
-        if (controls.fire.y === 0 || controls.fire.y > canvas.height - margin) controls.fire.y = canvas.height - 100;
-        if (controls.fire.x === 0 || controls.fire.x > canvas.width - margin) controls.fire.x = canvas.width - 220;
-    }
-    window.addEventListener('resize', resize);
-    resize();
+        // X座標が画面外（または初期値0）なら定位置に修正
+        if (controls.move.x < margin || controls.move.x > canvas.width - margin) controls.move.x = 100;
+        if (controls.aim.x < margin || controls.aim.x > canvas.width - margin) controls.aim.x = canvas.width - 100;
+        if (controls.fire.x < margin || controls.fire.x > canvas.width - margin) controls.fire.x = canvas.width - 220;
 
-    // ゲーム状態 (SETUP, PLAYING, LEVEL_CLEAR, GAME_OVER)
+        // Y座標が画面外（または初期値0）なら定位置に修正
+        if (controls.move.y < margin || controls.move.y > canvas.height - margin) controls.move.y = canvas.height - 100;
+        if (controls.aim.y < margin || controls.aim.y > canvas.height - margin) controls.aim.y = canvas.height - 100;
+        if (controls.fire.y < margin || controls.fire.y > canvas.height - margin) controls.fire.y = canvas.height - 100;
+    }
+
+    // 回転時の描画バグを防ぐため、少し遅延させてリサイズ処理を実行
+    let resizeTimer;
+    function handleResize() {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(applyResize, 200);
+    }
+
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+    applyResize(); // 初回実行
+
+    // ゲーム状態
     let gameState = 'SETUP';
     let level = 1;
     let lives = 3;
     let score = 0;
-    
-    // セットアップ画面用のドラッグ状態
     let draggingControl = null;
 
     // --- タッチイベント処理 ---
@@ -96,13 +105,11 @@
 
     canvas.addEventListener('touchstart', (e) => {
         e.preventDefault();
-        
-        // SETUPモード：ボタンの配置変更
         if (gameState === 'SETUP') {
             const touch = e.touches[0];
             const pos = getTouchPos(touch);
             
-            // STARTボタン判定 (画面上部中央)
+            // STARTボタン
             if (pos.x > canvas.width/2 - 75 && pos.x < canvas.width/2 + 75 && pos.y > 20 && pos.y < 70) {
                 initLevel(level);
                 gameState = 'PLAYING';
@@ -113,23 +120,19 @@
             else if (checkHitControl(pos.x, pos.y, controls.aim)) draggingControl = controls.aim;
             else if (checkHitControl(pos.x, pos.y, controls.fire)) draggingControl = controls.fire;
         } 
-        // PLAYINGモード：ゲーム操作
         else if (gameState === 'PLAYING') {
             for (let i = 0; i < e.changedTouches.length; i++) {
                 const touch = e.changedTouches[i];
                 const pos = getTouchPos(touch);
 
-                // 発射ボタンタップ
                 if (checkHitControl(pos.x, pos.y, controls.fire)) {
                     fireBullet();
                     controls.fire.activeId = touch.identifier;
                 }
-                // 移動ボタン
                 else if (checkHitControl(pos.x, pos.y, controls.move) && controls.move.activeId === null) {
                     controls.move.activeId = touch.identifier;
                     updateControlVector(controls.move, pos.x, pos.y);
                 }
-                // 照準ボタン
                 else if (checkHitControl(pos.x, pos.y, controls.aim) && controls.aim.activeId === null) {
                     controls.aim.activeId = touch.identifier;
                     updateControlVector(controls.aim, pos.x, pos.y);
@@ -140,7 +143,6 @@
 
     canvas.addEventListener('touchmove', (e) => {
         e.preventDefault();
-        
         if (gameState === 'SETUP' && draggingControl) {
             const touch = e.touches[0];
             draggingControl.x = touch.clientX;
@@ -149,7 +151,6 @@
             for (let i = 0; i < e.changedTouches.length; i++) {
                 const touch = e.changedTouches[i];
                 const pos = getTouchPos(touch);
-                
                 if (controls.move.activeId === touch.identifier) updateControlVector(controls.move, pos.x, pos.y);
                 if (controls.aim.activeId === touch.identifier) updateControlVector(controls.aim, pos.x, pos.y);
             }
@@ -193,7 +194,7 @@
             const by = player.y + Math.sin(player.angle) * spawnDist;
             const speed = 6;
             bullets.push(new Bullet(bx, by, Math.cos(player.angle) * speed, Math.sin(player.angle) * speed, true));
-            player.cooldown = 30; // 連射制限
+            player.cooldown = 30;
         }
     }
 
@@ -205,13 +206,11 @@
             this.width = 24;
             this.height = 24;
             this.color = color;
-            this.type = type; // 'player', 'stationary', 'moving'
+            this.type = type;
             this.angle = 0;
             this.baseSpeed = type === 'player' ? 2.5 : (type === 'moving' ? 1.5 : 0);
             this.cooldown = 0;
             this.dead = false;
-            
-            // AI用変数
             this.moveTimer = 0;
             this.moveDir = 0;
         }
@@ -220,27 +219,20 @@
             if (this.dead) return;
             ctx.save();
             ctx.translate(this.x, this.y);
-            
-            // 車体
             ctx.fillStyle = this.color;
             ctx.fillRect(-this.width/2, -this.height/2, this.width, this.height);
-            
-            // 砲台
             ctx.rotate(this.angle);
             ctx.fillStyle = '#333';
             ctx.fillRect(0, -4, 20, 8);
-            
             ctx.restore();
         }
 
         updateAI() {
             if (this.type === 'stationary' || this.type === 'moving') {
-                // プレイヤーの方を向く
                 const dx = player.x - this.x;
                 const dy = player.y - this.y;
                 this.angle = Math.atan2(dy, dx);
                 
-                // 動くタイプの場合のランダム移動
                 if (this.type === 'moving') {
                     this.moveTimer--;
                     if (this.moveTimer <= 0) {
@@ -250,7 +242,6 @@
                     moveEntity(this, Math.cos(this.moveDir) * this.baseSpeed, Math.sin(this.moveDir) * this.baseSpeed);
                 }
 
-                // 射撃（難易度に応じて確率を調整）
                 const fireRate = level === 1 ? 0.005 : 0.01;
                 if (Math.random() < fireRate && this.cooldown <= 0) {
                     const bx = this.x + Math.cos(this.angle) * 20;
@@ -322,3 +313,202 @@
         if (entity.x - entity.width/2 < 0 || entity.x + entity.width/2 > canvas.width || checkWallHit(entity.x, entity.y, entity.width/2)) {
             entity.x -= dx;
         }
+        entity.y += dy;
+        if (entity.y - entity.height/2 < 0 || entity.y + entity.height/2 > canvas.height || checkWallHit(entity.x, entity.y, entity.height/2)) {
+            entity.y -= dy;
+        }
+    }
+
+    function initLevel(lvl) {
+        player = new Tank(100, canvas.height / 2, '#0074D9', 'player');
+        enemies = [];
+        bullets = [];
+        blocks = [];
+
+        blocks.push({x: canvas.width/2 - 20, y: canvas.height/4, w: 40, h: canvas.height/2});
+        
+        if (lvl === 1) {
+            enemies.push(new Tank(canvas.width - 150, canvas.height/2, '#85144b', 'stationary'));
+        } else if (lvl === 2) {
+            enemies.push(new Tank(canvas.width - 150, canvas.height/4, '#85144b', 'stationary'));
+            enemies.push(new Tank(canvas.width - 150, canvas.height*3/4, '#85144b', 'stationary'));
+        } else if (lvl === 3) {
+            enemies.push(new Tank(canvas.width - 150, canvas.height/2, '#FF4136', 'moving'));
+        } else {
+            const enemyCount = Math.min(lvl, 5);
+            for(let i=0; i<enemyCount; i++){
+                enemies.push(new Tank(canvas.width - 100 - Math.random()*200, 50 + Math.random()*(canvas.height-100), '#FF4136', 'moving'));
+            }
+        }
+    }
+
+    function playerHit() {
+        if (player.dead) return;
+        player.dead = true;
+        lives--;
+        
+        setTimeout(() => {
+            if (lives > 0) {
+                bullets = [];
+                player.x = 100;
+                player.y = canvas.height / 2;
+                player.dead = false;
+            } else {
+                gameState = 'GAME_OVER';
+            }
+        }, 1000);
+    }
+
+    // --- 描画関数 ---
+    function drawControlUI(ctrl, label) {
+        ctx.beginPath();
+        ctx.arc(ctrl.x, ctrl.y, ctrl.r, 0, Math.PI * 2);
+        ctx.fillStyle = ctrl.color;
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'white';
+        ctx.stroke();
+        
+        if(ctrl.vecX !== undefined && (ctrl.vecX !== 0 || ctrl.vecY !== 0)) {
+            ctx.beginPath();
+            ctx.arc(ctrl.x + ctrl.vecX * 20, ctrl.y + ctrl.vecY * 20, 15, 0, Math.PI*2);
+            ctx.fillStyle = 'white';
+            ctx.fill();
+        }
+
+        ctx.fillStyle = 'white';
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        if (label === '発射') {
+            ctx.fillText('💣', ctrl.x, ctrl.y);
+        } else {
+            ctx.fillText(label, ctrl.x, ctrl.y - ctrl.r - 15);
+        }
+    }
+
+    // --- メインループ ---
+    function gameLoop() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (gameState === 'SETUP') {
+            ctx.fillStyle = '#333';
+            ctx.font = '24px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('ボタンをドラッグして好きな場所に配置してください', canvas.width/2, canvas.height/2);
+
+            ctx.fillStyle = '#2ECC40';
+            ctx.fillRect(canvas.width/2 - 75, 20, 150, 50);
+            ctx.fillStyle = 'white';
+            ctx.fillText('GAME START', canvas.width/2, 45);
+
+            drawControlUI(controls.move, '移動');
+            drawControlUI(controls.aim, '砲台');
+            drawControlUI(controls.fire, '発射');
+
+            requestAnimationFrame(gameLoop);
+            return;
+        }
+
+        if (gameState === 'GAME_OVER') {
+            ctx.fillStyle = '#000';
+            ctx.font = '40px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('GAME OVER', canvas.width/2, canvas.height/2);
+            ctx.font = '20px sans-serif';
+            ctx.fillText('タップして最初から', canvas.width/2, canvas.height/2 + 40);
+            
+            canvas.ontouchend = () => { 
+                level = 1; lives = 3; score = 0; gameState = 'SETUP'; canvas.ontouchend = null; applyResize();
+            };
+            requestAnimationFrame(gameLoop);
+            return;
+        }
+
+        if (gameState === 'LEVEL_CLEAR') {
+            ctx.fillStyle = '#000';
+            ctx.font = '40px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('STAGE CLEAR!', canvas.width/2, canvas.height/2);
+            requestAnimationFrame(gameLoop);
+            return;
+        }
+
+        // --- プレイ中の処理 ---
+        if (!player.dead) {
+            if (controls.move.vecX !== 0 || controls.move.vecY !== 0) {
+                moveEntity(player, controls.move.vecX * player.baseSpeed, controls.move.vecY * player.baseSpeed);
+            }
+            if (controls.aim.vecX !== 0 || controls.aim.vecY !== 0) {
+                player.angle = Math.atan2(controls.aim.vecY, controls.aim.vecX);
+            }
+            if (player.cooldown > 0) player.cooldown--;
+        }
+
+        ctx.fillStyle = '#8B4513';
+        blocks.forEach(b => {
+            ctx.fillRect(b.x, b.y, b.w, b.h);
+            ctx.strokeRect(b.x, b.y, b.w, b.h);
+        });
+
+        enemies.forEach(enemy => {
+            enemy.updateAI();
+            enemy.draw();
+        });
+
+        bullets.forEach(bullet => {
+            bullet.update();
+            bullet.draw();
+
+            if (!bullet.dead) {
+                if ((!bullet.isPlayer || bullet.bounces > 0) && !player.dead) {
+                    if (Math.hypot(bullet.x - player.x, bullet.y - player.y) < player.width/2 + bullet.radius) {
+                        bullet.dead = true;
+                        playerHit();
+                    }
+                }
+
+                if (bullet.isPlayer) {
+                    enemies.forEach(enemy => {
+                        if (!enemy.dead && Math.hypot(bullet.x - enemy.x, bullet.y - enemy.y) < enemy.width/2 + bullet.radius) {
+                            enemy.dead = true;
+                            bullet.dead = true;
+                            score += 100;
+                        }
+                    });
+                }
+            }
+        });
+
+        enemies = enemies.filter(e => !e.dead);
+        bullets = bullets.filter(b => !b.dead);
+
+        if (enemies.length === 0 && !player.dead) {
+            gameState = 'LEVEL_CLEAR';
+            setTimeout(() => {
+                level++;
+                initLevel(level);
+                gameState = 'PLAYING';
+            }, 2000);
+        }
+
+        player.draw();
+
+        drawControlUI(controls.move, '');
+        drawControlUI(controls.aim, '');
+        drawControlUI(controls.fire, '発射');
+
+        ctx.fillStyle = '#333';
+        ctx.font = '20px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`Stage: ${level}  Score: ${score}  命: ${'❤️'.repeat(lives)}`, 20, 30);
+
+        requestAnimationFrame(gameLoop);
+    }
+
+    requestAnimationFrame(gameLoop);
+
+</script>
+</body>
+</html>
