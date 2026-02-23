@@ -17,7 +17,6 @@
         canvas {
             display: block;
         }
-        /* 縦画面のときに被せる警告オーバーレイ（Canvasは消さずに上に被せる） */
         #portrait-warning {
             display: none;
             position: fixed;
@@ -34,7 +33,6 @@
         }
         @media screen and (orientation: portrait) {
             #portrait-warning { display: flex; }
-            /* ここにあった #gameCanvas { display: none; } を削除して描画バグを回避 */
         }
     </style>
 </head>
@@ -58,25 +56,20 @@
         fire: { x: 0, y: 0, r: 40, color: 'rgba(255, 220, 0, 0.5)', activeId: null }
     };
 
-    // 画面サイズ調整とボタンの画面外はみ出し防止
     function applyResize() {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
 
         const margin = 30;
-        
-        // X座標が画面外（または初期値0）なら定位置に修正
         if (controls.move.x < margin || controls.move.x > canvas.width - margin) controls.move.x = 100;
         if (controls.aim.x < margin || controls.aim.x > canvas.width - margin) controls.aim.x = canvas.width - 100;
         if (controls.fire.x < margin || controls.fire.x > canvas.width - margin) controls.fire.x = canvas.width - 220;
 
-        // Y座標が画面外（または初期値0）なら定位置に修正
         if (controls.move.y < margin || controls.move.y > canvas.height - margin) controls.move.y = canvas.height - 100;
         if (controls.aim.y < margin || controls.aim.y > canvas.height - margin) controls.aim.y = canvas.height - 100;
         if (controls.fire.y < margin || controls.fire.y > canvas.height - margin) controls.fire.y = canvas.height - 100;
     }
 
-    // 回転時の描画バグを防ぐため、少し遅延させてリサイズ処理を実行
     let resizeTimer;
     function handleResize() {
         clearTimeout(resizeTimer);
@@ -85,9 +78,8 @@
 
     window.addEventListener('resize', handleResize);
     window.addEventListener('orientationchange', handleResize);
-    applyResize(); // 初回実行
+    applyResize();
 
-    // ゲーム状態
     let gameState = 'SETUP';
     let level = 1;
     let lives = 3;
@@ -109,7 +101,6 @@
             const touch = e.touches[0];
             const pos = getTouchPos(touch);
             
-            // STARTボタン
             if (pos.x > canvas.width/2 - 75 && pos.x < canvas.width/2 + 75 && pos.y > 20 && pos.y < 70) {
                 initLevel(level);
                 gameState = 'PLAYING';
@@ -198,6 +189,47 @@
         }
     }
 
+    // --- 爆発エフェクト（パーティクル）定義 ---
+    class Particle {
+        constructor(x, y, color) {
+            this.x = x;
+            this.y = y;
+            this.color = color;
+            const angle = Math.random() * Math.PI * 2;
+            const speed = Math.random() * 4 + 1;
+            this.vx = Math.cos(angle) * speed;
+            this.vy = Math.sin(angle) * speed;
+            this.life = 1.0;
+            this.decay = Math.random() * 0.03 + 0.02; // 消えるスピード
+            this.size = Math.random() * 5 + 2;
+        }
+        update() {
+            this.x += this.vx;
+            this.y += this.vy;
+            this.life -= this.decay;
+        }
+        draw() {
+            if (this.life <= 0) return;
+            ctx.save();
+            ctx.globalAlpha = this.life;
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+    }
+
+    let particles = [];
+    function createExplosion(x, y, baseColor) {
+        for(let i = 0; i < 30; i++) {
+            // ベース色、オレンジ、黄色を混ぜて爆発っぽくする
+            const colors = [baseColor, '#FF851B', '#FFDC00'];
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            particles.push(new Particle(x, y, color));
+        }
+    }
+
     // --- オブジェクト定義 ---
     class Tank {
         constructor(x, y, color, type) {
@@ -213,6 +245,9 @@
             this.dead = false;
             this.moveTimer = 0;
             this.moveDir = 0;
+            
+            // 敵の発射タイマー（初期値は少しバラけさせる）
+            this.fireTimer = 60 + Math.random() * 60; 
         }
 
         draw() {
@@ -242,12 +277,17 @@
                     moveEntity(this, Math.cos(this.moveDir) * this.baseSpeed, Math.sin(this.moveDir) * this.baseSpeed);
                 }
 
-                const fireRate = level === 1 ? 0.005 : 0.01;
-                if (Math.random() < fireRate && this.cooldown <= 0) {
+                // 敵の射撃ロジック（一定秒数ごとに確実に撃つように変更）
+                this.fireTimer--;
+                if (this.fireTimer <= 0) {
                     const bx = this.x + Math.cos(this.angle) * 20;
                     const by = this.y + Math.sin(this.angle) * 20;
                     bullets.push(new Bullet(bx, by, Math.cos(this.angle) * 4, Math.sin(this.angle) * 4, false));
-                    this.cooldown = 90;
+                    
+                    // 次の発射までの間隔（ステージが上がるほど短くなる）
+                    // 基準: Lv1=約3〜4秒, Lv5=約1〜2秒
+                    const baseInterval = Math.max(60, 240 - level * 30);
+                    this.fireTimer = baseInterval + Math.random() * 60;
                 }
             }
         }
@@ -324,6 +364,7 @@
         enemies = [];
         bullets = [];
         blocks = [];
+        particles = []; // ステージ開始時に爆発エフェクトをリセット
 
         blocks.push({x: canvas.width/2 - 20, y: canvas.height/4, w: 40, h: canvas.height/2});
         
@@ -347,6 +388,9 @@
         player.dead = true;
         lives--;
         
+        // プレイヤー爆発
+        createExplosion(player.x, player.y, player.color);
+        
         setTimeout(() => {
             if (lives > 0) {
                 bullets = [];
@@ -356,7 +400,7 @@
             } else {
                 gameState = 'GAME_OVER';
             }
-        }, 1000);
+        }, 1500); // 爆発が見えるようにリスポーンを少し遅らせる
     }
 
     // --- 描画関数 ---
@@ -412,6 +456,9 @@
         }
 
         if (gameState === 'GAME_OVER') {
+            // 爆発エフェクトを描画し続ける
+            particles.forEach(p => { p.update(); p.draw(); });
+            
             ctx.fillStyle = '#000';
             ctx.font = '40px sans-serif';
             ctx.textAlign = 'center';
@@ -427,6 +474,9 @@
         }
 
         if (gameState === 'LEVEL_CLEAR') {
+            // クリア時もエフェクトを残す
+            particles.forEach(p => { p.update(); p.draw(); });
+
             ctx.fillStyle = '#000';
             ctx.font = '40px sans-serif';
             ctx.textAlign = 'center';
@@ -462,6 +512,7 @@
             bullet.draw();
 
             if (!bullet.dead) {
+                // プレイヤーへの当たり判定（敵の弾、または自分の弾が跳ね返ってきた時）
                 if ((!bullet.isPlayer || bullet.bounces > 0) && !player.dead) {
                     if (Math.hypot(bullet.x - player.x, bullet.y - player.y) < player.width/2 + bullet.radius) {
                         bullet.dead = true;
@@ -469,17 +520,25 @@
                     }
                 }
 
-                if (bullet.isPlayer) {
+                // 敵への当たり判定（プレイヤーの弾、または「跳ね返った敵自身の弾」）
+                if (bullet.isPlayer || (!bullet.isPlayer && bullet.bounces > 0)) {
                     enemies.forEach(enemy => {
                         if (!enemy.dead && Math.hypot(bullet.x - enemy.x, bullet.y - enemy.y) < enemy.width/2 + bullet.radius) {
                             enemy.dead = true;
                             bullet.dead = true;
-                            score += 100;
+                            
+                            // 敵の爆発エフェクトを生成
+                            createExplosion(enemy.x, enemy.y, enemy.color);
+                            score += 100; // 自爆でもスコア加算
                         }
                     });
                 }
             }
         });
+
+        // 爆発エフェクトの更新と描画
+        particles.forEach(p => { p.update(); p.draw(); });
+        particles = particles.filter(p => p.life > 0);
 
         enemies = enemies.filter(e => !e.dead);
         bullets = bullets.filter(b => !b.dead);
@@ -499,16 +558,4 @@
         drawControlUI(controls.aim, '');
         drawControlUI(controls.fire, '発射');
 
-        ctx.fillStyle = '#333';
-        ctx.font = '20px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText(`Stage: ${level}  Score: ${score}  命: ${'❤️'.repeat(lives)}`, 20, 30);
-
-        requestAnimationFrame(gameLoop);
-    }
-
-    requestAnimationFrame(gameLoop);
-
-</script>
-</body>
-</html>
+  
