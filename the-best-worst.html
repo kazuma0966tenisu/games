@@ -2,25 +2,30 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tank Game - Custom Controls</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Tank Game - Final Fix</title>
     <style>
-        body {
+        * { box-sizing: border-box; }
+        body, html {
             margin: 0;
             padding: 0;
+            width: 100%;
+            height: 100%;
+            height: 100dvh; /* 最新のブラウザで高さを正確に取得 */
             background-color: #e0e0e0;
             overflow: hidden;
             touch-action: none;
-            user-select: none;
-            -webkit-user-select: none;
+            position: fixed; /* スクロールを完全に防止 */
         }
         canvas {
             display: block;
+            width: 100%;
+            height: 100%;
         }
         #portrait-warning {
             display: none;
             position: fixed;
-            top: 0; left: 0; width: 100vw; height: 100vh;
+            top: 0; left: 0; width: 100%; height: 100%;
             background-color: #333;
             color: white;
             z-index: 9999;
@@ -29,7 +34,6 @@
             align-items: center;
             font-family: sans-serif;
             text-align: center;
-            touch-action: none;
         }
         @media screen and (orientation: portrait) {
             #portrait-warning { display: flex; }
@@ -49,7 +53,7 @@
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
 
-    // コントロールUIの初期設定
+    // コントロールUI
     const controls = {
         move: { x: 100, y: 0, r: 50, color: 'rgba(0, 116, 217, 0.5)', activeId: null, vecX: 0, vecY: 0 },
         aim:  { x: 0, y: 0, r: 50, color: 'rgba(255, 65, 54, 0.5)', activeId: null, vecX: 0, vecY: 0 },
@@ -57,76 +61,71 @@
     };
 
     function applyResize() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+        // ブラウザの実際の表示サイズを取得
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        
+        canvas.width = w;
+        canvas.height = h;
 
-        const margin = 30;
-        if (controls.move.x < margin || controls.move.x > canvas.width - margin) controls.move.x = 100;
-        if (controls.aim.x < margin || controls.aim.x > canvas.width - margin) controls.aim.x = canvas.width - 100;
-        if (controls.fire.x < margin || controls.fire.x > canvas.width - margin) controls.fire.x = canvas.width - 220;
+        // ボタンが画面外なら中央付近に戻す
+        const margin = 50;
+        if (controls.move.x < margin || controls.move.x > w - margin) controls.move.x = 100;
+        if (controls.move.y < margin || controls.move.y > h - margin) controls.move.y = h - 100;
 
-        if (controls.move.y < margin || controls.move.y > canvas.height - margin) controls.move.y = canvas.height - 100;
-        if (controls.aim.y < margin || controls.aim.y > canvas.height - margin) controls.aim.y = canvas.height - 100;
-        if (controls.fire.y < margin || controls.fire.y > canvas.height - margin) controls.fire.y = canvas.height - 100;
+        if (controls.aim.x < margin || controls.aim.x > w - margin) controls.aim.x = w - 100;
+        if (controls.aim.y < margin || controls.aim.y > h - margin) controls.aim.y = h - 100;
+
+        if (controls.fire.x < margin || controls.fire.x > w - margin) controls.fire.x = w - 220;
+        if (controls.fire.y < margin || controls.fire.y > h - margin) controls.fire.y = h - 100;
+        
+        // 再描画を促す
+        if(gameState === 'SETUP') drawSetup();
     }
 
-    let resizeTimer;
-    function handleResize() {
-        clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(applyResize, 200);
-    }
+    // 回転・リサイズ時に複数回実行して真っ白を防ぐ
+    window.addEventListener('resize', () => {
+        applyResize();
+        setTimeout(applyResize, 100);
+        setTimeout(applyResize, 500);
+    });
+    window.addEventListener('orientationchange', () => {
+        setTimeout(applyResize, 200);
+    });
 
-    window.addEventListener('resize', handleResize);
-    window.addEventListener('orientationchange', handleResize);
-    applyResize();
-
+    // 初期化
     let gameState = 'SETUP';
     let level = 1;
     let lives = 3;
     let score = 0;
     let draggingControl = null;
+    let particles = [];
+    let player, enemies = [], bullets = [], blocks = [];
 
-    // --- タッチイベント処理 ---
-    function getTouchPos(touch) {
-        return { x: touch.clientX, y: touch.clientY };
-    }
-
-    function checkHitControl(x, y, control) {
-        return Math.hypot(x - control.x, y - control.y) < control.r;
-    }
-
+    // --- タッチ処理 ---
     canvas.addEventListener('touchstart', (e) => {
         e.preventDefault();
+        const touch = e.touches[0];
+        const pos = { x: touch.clientX, y: touch.clientY };
+
         if (gameState === 'SETUP') {
-            const touch = e.touches[0];
-            const pos = getTouchPos(touch);
-            
             if (pos.x > canvas.width/2 - 75 && pos.x < canvas.width/2 + 75 && pos.y > 20 && pos.y < 70) {
                 initLevel(level);
                 gameState = 'PLAYING';
                 return;
             }
-
-            if (checkHitControl(pos.x, pos.y, controls.move)) draggingControl = controls.move;
-            else if (checkHitControl(pos.x, pos.y, controls.aim)) draggingControl = controls.aim;
-            else if (checkHitControl(pos.x, pos.y, controls.fire)) draggingControl = controls.fire;
+            if (Math.hypot(pos.x - controls.move.x, pos.y - controls.move.y) < controls.move.r) draggingControl = controls.move;
+            else if (Math.hypot(pos.x - controls.aim.x, pos.y - controls.aim.y) < controls.aim.r) draggingControl = controls.aim;
+            else if (Math.hypot(pos.x - controls.fire.x, pos.y - controls.fire.y) < controls.fire.r) draggingControl = controls.fire;
         } 
         else if (gameState === 'PLAYING') {
-            for (let i = 0; i < e.changedTouches.length; i++) {
-                const touch = e.changedTouches[i];
-                const pos = getTouchPos(touch);
-
-                if (checkHitControl(pos.x, pos.y, controls.fire)) {
+            for (let t of e.changedTouches) {
+                if (Math.hypot(t.clientX - controls.fire.x, t.clientY - controls.fire.y) < controls.fire.r) {
                     fireBullet();
-                    controls.fire.activeId = touch.identifier;
-                }
-                else if (checkHitControl(pos.x, pos.y, controls.move) && controls.move.activeId === null) {
-                    controls.move.activeId = touch.identifier;
-                    updateControlVector(controls.move, pos.x, pos.y);
-                }
-                else if (checkHitControl(pos.x, pos.y, controls.aim) && controls.aim.activeId === null) {
-                    controls.aim.activeId = touch.identifier;
-                    updateControlVector(controls.aim, pos.x, pos.y);
+                } else if (Math.hypot(t.clientX - controls.move.x, t.clientY - controls.move.y) < controls.move.r) {
+                    controls.move.activeId = t.identifier;
+                } else if (Math.hypot(t.clientX - controls.aim.x, t.clientY - controls.aim.y) < controls.aim.r) {
+                    controls.aim.activeId = t.identifier;
                 }
             }
         }
@@ -135,427 +134,177 @@
     canvas.addEventListener('touchmove', (e) => {
         e.preventDefault();
         if (gameState === 'SETUP' && draggingControl) {
-            const touch = e.touches[0];
-            draggingControl.x = touch.clientX;
-            draggingControl.y = touch.clientY;
+            draggingControl.x = e.touches[0].clientX;
+            draggingControl.y = e.touches[0].clientY;
         } else if (gameState === 'PLAYING') {
-            for (let i = 0; i < e.changedTouches.length; i++) {
-                const touch = e.changedTouches[i];
-                const pos = getTouchPos(touch);
-                if (controls.move.activeId === touch.identifier) updateControlVector(controls.move, pos.x, pos.y);
-                if (controls.aim.activeId === touch.identifier) updateControlVector(controls.aim, pos.x, pos.y);
+            for (let t of e.touches) {
+                if (t.identifier === controls.move.activeId) {
+                    let dx = t.clientX - controls.move.x, dy = t.clientY - controls.move.y;
+                    let d = Math.hypot(dx, dy) || 1;
+                    controls.move.vecX = dx/d; controls.move.vecY = dy/d;
+                }
+                if (t.identifier === controls.aim.activeId) {
+                    let dx = t.clientX - controls.aim.x, dy = t.clientY - controls.aim.y;
+                    let d = Math.hypot(dx, dy) || 1;
+                    controls.aim.vecX = dx/d; controls.aim.vecY = dy/d;
+                }
             }
         }
     }, {passive: false});
 
-    function endTouch(e) {
-        e.preventDefault();
-        if (gameState === 'SETUP') {
-            draggingControl = null;
-        } else if (gameState === 'PLAYING') {
-            for (let i = 0; i < e.changedTouches.length; i++) {
-                const id = e.changedTouches[i].identifier;
-                if (controls.move.activeId === id) { controls.move.activeId = null; controls.move.vecX = 0; controls.move.vecY = 0; }
-                if (controls.aim.activeId === id) { controls.aim.activeId = null; controls.aim.vecX = 0; controls.aim.vecY = 0; }
-                if (controls.fire.activeId === id) { controls.fire.activeId = null; }
-            }
+    canvas.addEventListener('touchend', (e) => {
+        draggingControl = null;
+        for (let t of e.changedTouches) {
+            if (t.identifier === controls.move.activeId) { controls.move.activeId = null; controls.move.vecX = 0; controls.move.vecY = 0; }
+            if (t.identifier === controls.aim.activeId) { controls.aim.activeId = null; controls.aim.vecX = 0; controls.aim.vecY = 0; }
         }
-    }
+    });
 
-    canvas.addEventListener('touchend', endTouch, {passive: false});
-    canvas.addEventListener('touchcancel', endTouch, {passive: false});
-
-    function updateControlVector(control, tx, ty) {
-        let dx = tx - control.x;
-        let dy = ty - control.y;
-        let dist = Math.hypot(dx, dy);
-        if (dist > 5) {
-            control.vecX = dx / dist;
-            control.vecY = dy / dist;
-        } else {
-            control.vecX = 0;
-            control.vecY = 0;
-        }
-    }
-
-    function fireBullet() {
-        if (player && !player.dead && player.cooldown <= 0) {
-            const spawnDist = 20; 
-            const bx = player.x + Math.cos(player.angle) * spawnDist;
-            const by = player.y + Math.sin(player.angle) * spawnDist;
-            const speed = 6;
-            bullets.push(new Bullet(bx, by, Math.cos(player.angle) * speed, Math.sin(player.angle) * speed, true));
-            player.cooldown = 30;
-        }
-    }
-
-    // --- 爆発エフェクト（パーティクル）定義 ---
+    // --- ゲームエンジン ---
     class Particle {
         constructor(x, y, color) {
-            this.x = x;
-            this.y = y;
-            this.color = color;
-            const angle = Math.random() * Math.PI * 2;
-            const speed = Math.random() * 4 + 1;
-            this.vx = Math.cos(angle) * speed;
-            this.vy = Math.sin(angle) * speed;
+            this.x = x; this.y = y; this.color = color;
+            let a = Math.random() * 6.28, s = Math.random() * 4 + 1;
+            this.vx = Math.cos(a) * s; this.vy = Math.sin(a) * s;
             this.life = 1.0;
-            this.decay = Math.random() * 0.03 + 0.02; // 消えるスピード
-            this.size = Math.random() * 5 + 2;
         }
-        update() {
-            this.x += this.vx;
-            this.y += this.vy;
-            this.life -= this.decay;
-        }
+        update() { this.x += this.vx; this.y += this.vy; this.life -= 0.03; }
         draw() {
-            if (this.life <= 0) return;
-            ctx.save();
-            ctx.globalAlpha = this.life;
-            ctx.fillStyle = this.color;
-            ctx.beginPath();
-            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
+            ctx.globalAlpha = this.life; ctx.fillStyle = this.color;
+            ctx.beginPath(); ctx.arc(this.x, this.y, 3, 0, 6.28); ctx.fill(); ctx.globalAlpha = 1;
         }
     }
 
-    let particles = [];
-    function createExplosion(x, y, baseColor) {
-        for(let i = 0; i < 30; i++) {
-            // ベース色、オレンジ、黄色を混ぜて爆発っぽくする
-            const colors = [baseColor, '#FF851B', '#FFDC00'];
-            const color = colors[Math.floor(Math.random() * colors.length)];
-            particles.push(new Particle(x, y, color));
-        }
-    }
-
-    // --- オブジェクト定義 ---
     class Tank {
         constructor(x, y, color, type) {
-            this.x = x;
-            this.y = y;
-            this.width = 24;
-            this.height = 24;
-            this.color = color;
-            this.type = type;
-            this.angle = 0;
-            this.baseSpeed = type === 'player' ? 2.5 : (type === 'moving' ? 1.5 : 0);
-            this.cooldown = 0;
-            this.dead = false;
-            this.moveTimer = 0;
-            this.moveDir = 0;
-            
-            // 敵の発射タイマー（初期値は少しバラけさせる）
-            this.fireTimer = 60 + Math.random() * 60; 
+            this.x = x; this.y = y; this.color = color; this.type = type;
+            this.angle = 0; this.cooldown = 0; this.dead = false; this.fireTimer = 100;
         }
-
         draw() {
             if (this.dead) return;
-            ctx.save();
-            ctx.translate(this.x, this.y);
-            ctx.fillStyle = this.color;
-            ctx.fillRect(-this.width/2, -this.height/2, this.width, this.height);
-            ctx.rotate(this.angle);
-            ctx.fillStyle = '#333';
-            ctx.fillRect(0, -4, 20, 8);
+            ctx.save(); ctx.translate(this.x, this.y);
+            ctx.fillStyle = this.color; ctx.fillRect(-12, -12, 24, 24);
+            ctx.rotate(this.angle); ctx.fillStyle = '#333'; ctx.fillRect(0, -4, 20, 8);
             ctx.restore();
-        }
-
-        updateAI() {
-            if (this.type === 'stationary' || this.type === 'moving') {
-                const dx = player.x - this.x;
-                const dy = player.y - this.y;
-                this.angle = Math.atan2(dy, dx);
-                
-                if (this.type === 'moving') {
-                    this.moveTimer--;
-                    if (this.moveTimer <= 0) {
-                        this.moveDir = Math.random() * Math.PI * 2;
-                        this.moveTimer = 60 + Math.random() * 60;
-                    }
-                    moveEntity(this, Math.cos(this.moveDir) * this.baseSpeed, Math.sin(this.moveDir) * this.baseSpeed);
-                }
-
-                // 敵の射撃ロジック（一定秒数ごとに確実に撃つように変更）
-                this.fireTimer--;
-                if (this.fireTimer <= 0) {
-                    const bx = this.x + Math.cos(this.angle) * 20;
-                    const by = this.y + Math.sin(this.angle) * 20;
-                    bullets.push(new Bullet(bx, by, Math.cos(this.angle) * 4, Math.sin(this.angle) * 4, false));
-                    
-                    // 次の発射までの間隔（ステージが上がるほど短くなる）
-                    // 基準: Lv1=約3〜4秒, Lv5=約1〜2秒
-                    const baseInterval = Math.max(60, 240 - level * 30);
-                    this.fireTimer = baseInterval + Math.random() * 60;
-                }
-            }
         }
     }
 
     class Bullet {
-        constructor(x, y, vx, vy, isPlayer) {
-            this.x = x;
-            this.y = y;
-            this.vx = vx;
-            this.vy = vy;
-            this.radius = 4;
-            this.isPlayer = isPlayer;
-            this.bounces = 0;
-            this.maxBounces = 1; 
-            this.dead = false;
+        constructor(x, y, vx, vy, isP) {
+            this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.isP = isP; this.b = 0; this.dead = false;
         }
-
-        draw() {
-            ctx.beginPath();
-            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-            ctx.fillStyle = this.isPlayer ? '#333' : '#a00';
-            ctx.fill();
-            ctx.closePath();
-        }
-
         update() {
             this.x += this.vx;
-            if (this.x - this.radius < 0 || this.x + this.radius > canvas.width || checkWallHit(this.x, this.y, this.radius)) {
-                this.x -= this.vx;
-                this.vx *= -1;
-                this.bounces++;
-            }
-
+            if (this.x < 4 || this.x > canvas.width-4 || isHitWall(this.x, this.y)) { this.vx *= -1; this.x += this.vx; this.b++; }
             this.y += this.vy;
-            if (this.y - this.radius < 0 || this.y + this.radius > canvas.height || checkWallHit(this.x, this.y, this.radius)) {
-                this.y -= this.vy;
-                this.vy *= -1;
-                this.bounces++;
-            }
-
-            if (this.bounces > this.maxBounces) this.dead = true;
+            if (this.y < 4 || this.y > canvas.height-4 || isHitWall(this.x, this.y)) { this.vy *= -1; this.y += this.vy; this.b++; }
+            if (this.b > 1) this.dead = true;
         }
+        draw() { ctx.fillStyle = this.isP ? '#333' : '#a00'; ctx.beginPath(); ctx.arc(this.x, this.y, 4, 0, 6.28); ctx.fill(); }
     }
 
-    // --- ゲームロジック ---
-    let player;
-    let enemies = [];
-    let bullets = [];
-    let blocks = [];
-
-    function checkWallHit(x, y, r) {
-        for (let b of blocks) {
-            if (x + r > b.x && x - r < b.x + b.w && y + r > b.y && y - r < b.y + b.h) {
-                return true;
-            }
-        }
-        return false;
+    function isHitWall(x, y) {
+        return blocks.some(b => x > b.x && x < b.x+b.w && y > b.y && y < b.y+b.h);
     }
 
-    function moveEntity(entity, dx, dy) {
-        entity.x += dx;
-        if (entity.x - entity.width/2 < 0 || entity.x + entity.width/2 > canvas.width || checkWallHit(entity.x, entity.y, entity.width/2)) {
-            entity.x -= dx;
-        }
-        entity.y += dy;
-        if (entity.y - entity.height/2 < 0 || entity.y + entity.height/2 > canvas.height || checkWallHit(entity.x, entity.y, entity.height/2)) {
-            entity.y -= dy;
-        }
+    function fireBullet() {
+        if (!player || player.dead || player.cooldown > 0) return;
+        let vx = Math.cos(player.angle)*6, vy = Math.sin(player.angle)*6;
+        bullets.push(new Bullet(player.x + Math.cos(player.angle)*20, player.y + Math.sin(player.angle)*20, vx, vy, true));
+        player.cooldown = 30;
     }
 
     function initLevel(lvl) {
-        player = new Tank(100, canvas.height / 2, '#0074D9', 'player');
-        enemies = [];
-        bullets = [];
-        blocks = [];
-        particles = []; // ステージ開始時に爆発エフェクトをリセット
-
-        blocks.push({x: canvas.width/2 - 20, y: canvas.height/4, w: 40, h: canvas.height/2});
-        
-        if (lvl === 1) {
-            enemies.push(new Tank(canvas.width - 150, canvas.height/2, '#85144b', 'stationary'));
-        } else if (lvl === 2) {
-            enemies.push(new Tank(canvas.width - 150, canvas.height/4, '#85144b', 'stationary'));
-            enemies.push(new Tank(canvas.width - 150, canvas.height*3/4, '#85144b', 'stationary'));
-        } else if (lvl === 3) {
-            enemies.push(new Tank(canvas.width - 150, canvas.height/2, '#FF4136', 'moving'));
-        } else {
-            const enemyCount = Math.min(lvl, 5);
-            for(let i=0; i<enemyCount; i++){
-                enemies.push(new Tank(canvas.width - 100 - Math.random()*200, 50 + Math.random()*(canvas.height-100), '#FF4136', 'moving'));
-            }
-        }
+        player = new Tank(100, canvas.height/2, '#0074D9', 'player');
+        enemies = [new Tank(canvas.width-150, canvas.height/2, '#85144b', 'stationary')];
+        if(lvl > 1) enemies.push(new Tank(canvas.width-150, 100, '#FF4136', 'moving'));
+        bullets = []; blocks = [{x: canvas.width/2-20, y: canvas.height/4, w: 40, h: canvas.height/2}];
+        particles = [];
     }
 
-    function playerHit() {
-        if (player.dead) return;
-        player.dead = true;
-        lives--;
-        
-        // プレイヤー爆発
-        createExplosion(player.x, player.y, player.color);
-        
-        setTimeout(() => {
-            if (lives > 0) {
-                bullets = [];
-                player.x = 100;
-                player.y = canvas.height / 2;
-                player.dead = false;
-            } else {
-                gameState = 'GAME_OVER';
-            }
-        }, 1500); // 爆発が見えるようにリスポーンを少し遅らせる
+    function drawSetup() {
+        ctx.fillStyle = '#333'; ctx.font = '18px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('ボタンをドラッグして配置してください', canvas.width/2, canvas.height/2);
+        ctx.fillStyle = '#2ECC40'; ctx.fillRect(canvas.width/2-75, 20, 150, 40);
+        ctx.fillStyle = 'white'; ctx.fillText('GAME START', canvas.width/2, 47);
+        drawUI();
     }
 
-    // --- 描画関数 ---
-    function drawControlUI(ctrl, label) {
-        ctx.beginPath();
-        ctx.arc(ctrl.x, ctrl.y, ctrl.r, 0, Math.PI * 2);
-        ctx.fillStyle = ctrl.color;
-        ctx.fill();
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = 'white';
-        ctx.stroke();
-        
-        if(ctrl.vecX !== undefined && (ctrl.vecX !== 0 || ctrl.vecY !== 0)) {
-            ctx.beginPath();
-            ctx.arc(ctrl.x + ctrl.vecX * 20, ctrl.y + ctrl.vecY * 20, 15, 0, Math.PI*2);
-            ctx.fillStyle = 'white';
-            ctx.fill();
-        }
-
-        ctx.fillStyle = 'white';
-        ctx.font = '14px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        
-        if (label === '発射') {
-            ctx.fillText('💣', ctrl.x, ctrl.y);
-        } else {
-            ctx.fillText(label, ctrl.x, ctrl.y - ctrl.r - 15);
-        }
+    function drawUI() {
+        [controls.move, controls.aim, controls.fire].forEach((c, i) => {
+            ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, 6.28);
+            ctx.fillStyle = c.color; ctx.fill(); ctx.strokeStyle = 'white'; ctx.stroke();
+            ctx.fillStyle = 'white'; ctx.fillText(['移動','砲台','💣'][i], c.x, c.y+5);
+        });
     }
 
-    // --- メインループ ---
     function gameLoop() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-
+        
         if (gameState === 'SETUP') {
-            ctx.fillStyle = '#333';
-            ctx.font = '24px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('ボタンをドラッグして好きな場所に配置してください', canvas.width/2, canvas.height/2);
-
-            ctx.fillStyle = '#2ECC40';
-            ctx.fillRect(canvas.width/2 - 75, 20, 150, 50);
-            ctx.fillStyle = 'white';
-            ctx.fillText('GAME START', canvas.width/2, 45);
-
-            drawControlUI(controls.move, '移動');
-            drawControlUI(controls.aim, '砲台');
-            drawControlUI(controls.fire, '発射');
-
-            requestAnimationFrame(gameLoop);
-            return;
-        }
-
-        if (gameState === 'GAME_OVER') {
-            // 爆発エフェクトを描画し続ける
-            particles.forEach(p => { p.update(); p.draw(); });
-            
-            ctx.fillStyle = '#000';
-            ctx.font = '40px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('GAME OVER', canvas.width/2, canvas.height/2);
-            ctx.font = '20px sans-serif';
-            ctx.fillText('タップして最初から', canvas.width/2, canvas.height/2 + 40);
-            
-            canvas.ontouchend = () => { 
-                level = 1; lives = 3; score = 0; gameState = 'SETUP'; canvas.ontouchend = null; applyResize();
-            };
-            requestAnimationFrame(gameLoop);
-            return;
-        }
-
-        if (gameState === 'LEVEL_CLEAR') {
-            // クリア時もエフェクトを残す
-            particles.forEach(p => { p.update(); p.draw(); });
-
-            ctx.fillStyle = '#000';
-            ctx.font = '40px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('STAGE CLEAR!', canvas.width/2, canvas.height/2);
-            requestAnimationFrame(gameLoop);
-            return;
-        }
-
-        // --- プレイ中の処理 ---
-        if (!player.dead) {
-            if (controls.move.vecX !== 0 || controls.move.vecY !== 0) {
-                moveEntity(player, controls.move.vecX * player.baseSpeed, controls.move.vecY * player.baseSpeed);
+            drawSetup();
+        } else if (gameState === 'PLAYING') {
+            // 移動
+            if(controls.move.vecX) {
+                let nx = player.x + controls.move.vecX*2.5, ny = player.y + controls.move.vecY*2.5;
+                if(!isHitWall(nx, ny) && nx > 15 && nx < canvas.width-15) player.x = nx;
+                if(!isHitWall(player.x, ny) && ny > 15 && ny < canvas.height-15) player.y = ny;
             }
-            if (controls.aim.vecX !== 0 || controls.aim.vecY !== 0) {
-                player.angle = Math.atan2(controls.aim.vecY, controls.aim.vecX);
-            }
-            if (player.cooldown > 0) player.cooldown--;
-        }
+            if(controls.aim.vecX) player.angle = Math.atan2(controls.aim.vecY, controls.aim.vecX);
+            if(player.cooldown > 0) player.cooldown--;
 
-        ctx.fillStyle = '#8B4513';
-        blocks.forEach(b => {
-            ctx.fillRect(b.x, b.y, b.w, b.h);
-            ctx.strokeRect(b.x, b.y, b.w, b.h);
-        });
-
-        enemies.forEach(enemy => {
-            enemy.updateAI();
-            enemy.draw();
-        });
-
-        bullets.forEach(bullet => {
-            bullet.update();
-            bullet.draw();
-
-            if (!bullet.dead) {
-                // プレイヤーへの当たり判定（敵の弾、または自分の弾が跳ね返ってきた時）
-                if ((!bullet.isPlayer || bullet.bounces > 0) && !player.dead) {
-                    if (Math.hypot(bullet.x - player.x, bullet.y - player.y) < player.width/2 + bullet.radius) {
-                        bullet.dead = true;
-                        playerHit();
-                    }
+            // 敵AI
+            enemies.forEach(e => {
+                e.angle = Math.atan2(player.y - e.y, player.x - e.x);
+                e.fireTimer--;
+                if(e.fireTimer <= 0) {
+                    bullets.push(new Bullet(e.x+Math.cos(e.angle)*20, e.y+Math.sin(e.angle)*20, Math.cos(e.angle)*4, Math.sin(e.angle)*4, false));
+                    e.fireTimer = Math.max(40, 150 - level*20);
                 }
+                e.draw();
+            });
 
-                // 敵への当たり判定（プレイヤーの弾、または「跳ね返った敵自身の弾」）
-                if (bullet.isPlayer || (!bullet.isPlayer && bullet.bounces > 0)) {
-                    enemies.forEach(enemy => {
-                        if (!enemy.dead && Math.hypot(bullet.x - enemy.x, bullet.y - enemy.y) < enemy.width/2 + bullet.radius) {
-                            enemy.dead = true;
-                            bullet.dead = true;
-                            
-                            // 敵の爆発エフェクトを生成
-                            createExplosion(enemy.x, enemy.y, enemy.color);
-                            score += 100; // 自爆でもスコア加算
+            bullets.forEach((b, i) => {
+                b.update(); b.draw();
+                // プレイヤー当たり判定
+                if((!b.isP || b.b > 0) && Math.hypot(b.x-player.x, b.y-player.y) < 16) {
+                    lives--; b.dead = true; 
+                    for(let k=0; k<20; k++) particles.push(new Particle(player.x, player.y, player.color));
+                    if(lives <= 0) gameState = 'GAME_OVER';
+                }
+                // 敵当たり判定
+                if(b.isP || b.b > 0) {
+                    enemies.forEach(e => {
+                        if(Math.hypot(b.x-e.x, b.y-e.y) < 16) {
+                            e.dead = true; b.dead = true; score += 100;
+                            for(let k=0; k<20; k++) particles.push(new Particle(e.x, e.y, e.color));
                         }
                     });
                 }
-            }
-        });
+            });
+            
+            bullets = bullets.filter(b => !b.dead);
+            enemies = enemies.filter(e => !e.dead);
+            if(enemies.length === 0) { level++; initLevel(level); }
 
-        // 爆発エフェクトの更新と描画
-        particles.forEach(p => { p.update(); p.draw(); });
-        particles = particles.filter(p => p.life > 0);
-
-        enemies = enemies.filter(e => !e.dead);
-        bullets = bullets.filter(b => !b.dead);
-
-        if (enemies.length === 0 && !player.dead) {
-            gameState = 'LEVEL_CLEAR';
-            setTimeout(() => {
-                level++;
-                initLevel(level);
-                gameState = 'PLAYING';
-            }, 2000);
+            blocks.forEach(b => { ctx.fillStyle = '#8B4513'; ctx.fillRect(b.x, b.y, b.w, b.h); });
+            particles.forEach(p => { p.update(); p.draw(); });
+            particles = particles.filter(p => p.life > 0);
+            player.draw();
+            drawUI();
+            ctx.fillStyle = '#333'; ctx.textAlign = 'left'; ctx.fillText(`Lv: ${level} Score: ${score} 命: ${lives}`, 10, 25);
+        } else if (gameState === 'GAME_OVER') {
+            ctx.fillStyle = 'black'; ctx.font = '30px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText('GAME OVER', canvas.width/2, canvas.height/2);
+            ctx.font = '15px sans-serif'; ctx.fillText('タップでリトライ', canvas.width/2, canvas.height/2 + 40);
+            canvas.onclick = () => { location.reload(); };
         }
+        
+        requestAnimationFrame(gameLoop);
+    }
 
-        player.draw();
-
-        drawControlUI(controls.move, '');
-        drawControlUI(controls.aim, '');
-        drawControlUI(controls.fire, '発射');
-
-  
+    applyResize();
+    gameLoop();
+</script>
+</body>
+</html>
